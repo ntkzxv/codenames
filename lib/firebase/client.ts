@@ -1,0 +1,20 @@
+import { getApp, getApps, initializeApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
+
+const config = {
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+};
+
+export function firebaseConfigured() {
+  return Boolean(config.apiKey && config.authDomain && config.projectId && config.appId);
+}
+
+export function getFirebaseClient() {
+  if (!firebaseConfigured()) throw new Error("กรุณาตั้งค่า Firebase ในไฟล์ .env.local ก่อน");
+  const app = getApps().length ? getApp() : initializeApp(config);
+  return { auth: getAuth(app), db: getFirestore(app) };
+}

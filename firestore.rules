@@ -1,0 +1,38 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Prototype data model:
+    // rooms/ROOM: server-written public game document.
+    // Required fields: hostUid (string), members (map<uid, bool>), phase
+    // (lobby|playing), cards (list, at most 25), startingTeam/turn
+    // (red|blue|null), clue (string, max 40), clueNumber (0..9),
+    // guessesLeft (0..10), status, and history (list, at most 8).
+    // rooms/ROOM/secret/key: server-only spymasterUid and 25 hidden roles.
+    // All browser writes go through authenticated Next.js API routes; Admin
+    // SDK writes are privileged and must be validated by those routes.
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isRoomMember() {
+      return isSignedIn()
+        && resource.data.members is map
+        && resource.data.members[request.auth.uid] == true;
+    }
+
+    match /rooms/{roomCode} {
+      allow read: if isRoomMember();
+      allow create, update, delete: if false;
+
+      match /secret/{secretId} {
+        allow read, write: if false;
+      }
+    }
+
+    // Default deny for every path not explicitly handled above.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
