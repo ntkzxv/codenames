@@ -17,7 +17,23 @@ export async function roomRequest<T>(payload: Record<string, unknown>): Promise<
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(payload),
   });
-  const result = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(result.error || "ส่งคำสั่งไม่สำเร็จ");
+  const responseText = await response.text();
+  let result: (T & { error?: string }) | null = null;
+
+  if (responseText) {
+    try {
+      result = JSON.parse(responseText) as T & { error?: string };
+    } catch {
+      if (!response.ok) {
+        throw new Error(`เซิร์ฟเวอร์มีปัญหา (HTTP ${response.status}) กรุณาตรวจ Function Logs ใน Vercel`);
+      }
+      throw new Error("เซิร์ฟเวอร์ส่งข้อมูลกลับมาไม่ถูกต้อง");
+    }
+  }
+
+  if (!response.ok) {
+    throw new Error(result?.error || `เซิร์ฟเวอร์มีปัญหา (HTTP ${response.status})`);
+  }
+  if (!result) throw new Error("เซิร์ฟเวอร์ไม่ได้ส่งข้อมูลกลับมา");
   return result;
 }

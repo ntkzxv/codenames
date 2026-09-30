@@ -49,6 +49,13 @@
   box-sizing: border-box;
 }
 
+button,
+a[href],
+[role="button"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 html, body {
   min-height: 100%;
   margin: 0;
@@ -325,6 +332,7 @@ html, body {
               border-color 0.22s ease,
               background 0.25s ease;
   cursor: pointer;
+  touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   outline: none;
 }

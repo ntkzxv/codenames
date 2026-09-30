@@ -674,6 +674,7 @@ export default function Home() {
                 return (
                   <div key={`${card.word}-${index}`} className="card-wrapper">
                     <button
+                      type="button"
                       className={cardClass}
                       onClick={() => void revealCard(index)}
                       disabled={isSpy || gameOver || isRevealed || busy}
