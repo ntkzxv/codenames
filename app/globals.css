@@ -728,6 +728,24 @@ html, body {
   to { opacity: 1; transform: translate(-50%, 0); }
 }
 
+/* Keep iOS Safari's sticky :hover state from moving tap targets mid-touch. */
+@media (hover: none), (pointer: coarse) {
+  .icon-pill-btn:hover,
+  .btn-primary:hover:not(:disabled),
+  .btn-secondary:hover:not(:disabled),
+  .codename-card.unrevealed:not(:disabled):hover {
+    transform: none !important;
+  }
+
+  .btn-primary:active:not(:disabled) {
+    filter: brightness(0.92);
+  }
+
+  .btn-secondary:active:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
+  }
+}
+
 /* Mobile & iPad Responsiveness */
 @media (max-width: 900px) {
   .topbar {
