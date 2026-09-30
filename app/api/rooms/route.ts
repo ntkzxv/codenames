@@ -120,22 +120,25 @@ export async function POST(request: Request) {
     }
 
     if (body.action === "restart") {
-      const snapshot = await roomRef.get();
-      if (!snapshot.exists) return errorResponse("ไม่พบห้องนี้", 404);
-      const room = snapshot.data() as PublicGame;
-      if (room.hostUid !== uid) return errorResponse("เริ่มรอบใหม่ได้จากจอ Spymaster เท่านั้น", 403);
-      const batch = db.batch();
-      batch.set(roomRef, {
-        hostUid: room.hostUid,
-        members: room.members,
-        phase: "lobby",
-        cards: [],
-        startingTeam: null,
-        turn: null,
-        status: "lobby",
+      await db.runTransaction(async (transaction) => {
+        const snapshot = await transaction.get(roomRef);
+        if (!snapshot.exists) throw new Error("ไม่พบห้องนี้");
+        const room = snapshot.data() as PublicGame;
+        if (!membership(room, uid)) throw new Error("กรุณาเข้าห้องก่อน");
+        transaction.set(roomRef, {
+          hostUid: room.hostUid,
+          members: room.members,
+          phase: "lobby",
+          cards: [],
+          startingTeam: null,
+          turn: null,
+          status: "lobby",
+        });
+        transaction.set(roomRef.collection("secret").doc("key"), {
+          spymasterUid: room.hostUid,
+          roles: [] as Role[],
+        });
       });
-      batch.set(roomRef.collection("secret").doc("key"), { spymasterUid: uid, roles: [] as Role[] });
-      await batch.commit();
       return Response.json({ ok: true });
     }
 

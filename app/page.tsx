@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import {
+  useEffect,
+  useState,
+  useRef,
+  type MouseEvent as ReactMouseEvent,
+  type TouchEvent as ReactTouchEvent,
+} from "react";
 import Link from "next/link";
 import { doc, onSnapshot } from "firebase/firestore";
 import { firebaseConfigured, getFirebaseClient } from "@/lib/firebase/client";
@@ -12,6 +18,8 @@ import { launchConfetti } from "@/lib/confetti";
 
 type View = "spymaster" | "board";
 type Session = { code: string; view: View };
+type TouchTarget = { button: HTMLButtonElement; x: number; y: number };
+type SyntheticClickGuard = { button: HTMLButtonElement; expiresAt: number };
 const SESSION_KEY = "codenames-online-session-v1";
 
 // Demo showcase cards for the lobby
@@ -38,8 +46,67 @@ export default function Home() {
   // UI Enhancements
   const [soundOn, setSoundOn] = useState(() => sounds.enabled);
   const [showRulesModal, setShowRulesModal] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [copiedToast, setCopiedToast] = useState(false);
   const prevStatusRef = useRef<string | null>(null);
+  const touchTargetRef = useRef<TouchTarget | null>(null);
+  const syntheticClickGuardRef = useRef<SyntheticClickGuard | null>(null);
+
+  // iOS Safari can leave a hover state after touch. Dispatch the button click
+  // explicitly at touch end so actions do not depend on synthetic mouse input.
+  function handleTouchStartCapture(event: ReactTouchEvent<HTMLElement>) {
+    if (event.touches.length !== 1 || !(event.target instanceof Element)) {
+      touchTargetRef.current = null;
+      return;
+    }
+    const button = event.target.closest("button");
+    if (!(button instanceof HTMLButtonElement) || button.disabled) {
+      touchTargetRef.current = null;
+      return;
+    }
+    const touch = event.touches[0];
+    touchTargetRef.current = { button, x: touch.clientX, y: touch.clientY };
+  }
+
+  function handleTouchEndCapture(event: ReactTouchEvent<HTMLElement>) {
+    const start = touchTargetRef.current;
+    touchTargetRef.current = null;
+    if (!start || !(event.target instanceof Element)) return;
+    const button = event.target.closest("button");
+    const touch = event.changedTouches[0];
+    if (
+      button !== start.button ||
+      start.button.disabled ||
+      !touch ||
+      Math.hypot(touch.clientX - start.x, touch.clientY - start.y) > 12
+    ) return;
+
+    // Prevent the follow-up synthetic click from triggering the action twice.
+    event.preventDefault();
+    syntheticClickGuardRef.current = { button: start.button, expiresAt: Date.now() + 700 };
+    start.button.click();
+  }
+
+  function handleClickCapture(event: ReactMouseEvent<HTMLElement>) {
+    const guard = syntheticClickGuardRef.current;
+    if (!guard || !event.nativeEvent.isTrusted || !(event.target instanceof Element)) return;
+    if (Date.now() > guard.expiresAt) {
+      syntheticClickGuardRef.current = null;
+      return;
+    }
+    if (event.target.closest("button") === guard.button) {
+      syntheticClickGuardRef.current = null;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+
+  const touchActivationProps = {
+    onTouchStartCapture: handleTouchStartCapture,
+    onTouchEndCapture: handleTouchEndCapture,
+    onTouchCancelCapture: () => { touchTargetRef.current = null; },
+    onClickCapture: handleClickCapture,
+  };
 
   function toggleSound() {
     const newState = sounds.toggle();
@@ -247,11 +314,14 @@ export default function Home() {
               phase: "lobby",
               status: "lobby",
               cards: [],
+              startingTeam: null,
               turn: null,
             }
           : null
       );
       setSpyRoles([]);
+      setSpyReady(false);
+      setShowResetConfirm(false);
       sounds.playCardTap();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "เริ่มรอบใหม่ไม่สำเร็จ");
@@ -380,10 +450,30 @@ export default function Home() {
       </div>
     );
 
+  const renderResetModal = () =>
+    showResetConfirm && (
+      <div className="modal-overlay" role="presentation">
+        <div className="modal-content max-w-md" role="dialog" aria-modal="true" aria-labelledby="reset-title">
+          <h3 id="reset-title" className="text-xl font-bold text-white">เริ่มห้องใหม่?</h3>
+          <p className="mt-3 text-sm leading-relaxed text-gray-300">
+            กระดานและการ์ดที่เปิดแล้วจะถูกล้าง ทั้งสองหน้าจอจะกลับไปรอเริ่มเกมใหม่
+          </p>
+          <div className="mt-6 flex justify-end gap-3">
+            <button type="button" className="btn-secondary" onClick={() => setShowResetConfirm(false)}>
+              ยกเลิก
+            </button>
+            <button type="button" className="btn-primary" onClick={() => void restartRound()} disabled={busy}>
+              {busy ? "กำลังรีเซ็ต..." : "รีเซ็ตห้อง"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+
   // 1. SCREEN: Initial Welcome / Lobby Screen
   if (!view || !room) {
     return (
-      <main className="app-shell bg-espionage">
+      <main className="app-shell bg-espionage" {...touchActivationProps}>
         {renderHeader("ห้องออนไลน์ · Two Screens")}
 
         <div className="flex-1 flex flex-col justify-center px-4 py-8 max-w-6xl mx-auto w-full">
@@ -504,7 +594,7 @@ export default function Home() {
   // 2. SCREEN: Spymaster Gate / Privacy Passcode Screen
   if (isSpy && !spyReady) {
     return (
-      <main className="app-shell bg-espionage flex items-center justify-center p-4">
+      <main className="app-shell bg-espionage flex items-center justify-center p-4" {...touchActivationProps}>
         {renderHeader("Spymaster Screen")}
 
         <div className="w-full max-w-lg p-8 sm:p-10 rounded-3xl glass-panel-elevated text-center my-auto relative">
@@ -552,6 +642,7 @@ export default function Home() {
         </div>
 
         {renderRulesModal()}
+        {renderResetModal()}
         {message && (
           <div className="toast-bar text-rose-300 border-rose-500/30">
             <span>{message}</span>
@@ -567,7 +658,7 @@ export default function Home() {
   // 3. SCREEN: Room Waiting Screen (Phase === 'lobby')
   if (room.phase === "lobby") {
     return (
-      <main className="app-shell bg-espionage flex flex-col justify-center items-center p-4">
+      <main className="app-shell bg-espionage flex flex-col justify-center items-center p-4" {...touchActivationProps}>
         {renderHeader(isSpy ? "ห้อง Spymaster" : "จอกระดานผู้เล่น")}
 
         <div className="w-full max-w-xl p-8 sm:p-10 rounded-3xl glass-panel-elevated text-center my-auto">
@@ -618,16 +709,33 @@ export default function Home() {
                 <span>{busy ? "กำลังเริ่มเกม..." : "เริ่มเกมเดี๋ยวนี้"}</span>
                 <span>→</span>
               </button>
+              <button
+                className="btn-secondary flex-1 py-3"
+                onClick={() => setShowResetConfirm(true)}
+                disabled={busy}
+              >
+                รีเซ็ตห้อง
+              </button>
             </div>
           ) : (
-            <div className="flex items-center justify-center gap-3 text-sm text-emerald-400">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
-              <span>กำลังเชื่อมต่อกับ Spymaster...</span>
+            <div className="flex flex-col items-center gap-4">
+              <div className="flex items-center justify-center gap-3 text-sm text-emerald-400">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+                <span>กำลังเชื่อมต่อกับ Spymaster...</span>
+              </div>
+              <button
+                className="btn-secondary py-3 px-6"
+                onClick={() => setShowResetConfirm(true)}
+                disabled={busy}
+              >
+                รีเซ็ตห้อง
+              </button>
             </div>
           )}
         </div>
 
         {renderRulesModal()}
+        {renderResetModal()}
         {message && (
           <div className="toast-bar text-rose-300 border-rose-500/30">
             <span>{message}</span>
@@ -646,6 +754,7 @@ export default function Home() {
       className={`app-shell bg-espionage flex flex-col h-screen overflow-hidden ${
         isSpy ? "spymaster-mode" : "board-mode"
       }`}
+      {...touchActivationProps}
     >
       {/* Main Playing Field */}
       <div className="flex-1 flex flex-col min-h-0 px-2 sm:px-4 pt-2 pb-24 max-w-[1700px] mx-auto w-full">
@@ -722,18 +831,24 @@ export default function Home() {
             <div className="text-sm font-bold text-white">{gameOver ? (winner ? `${teamName(winner)} ชนะ!` : "จบเกม") : teamName(currentTurn)}</div>
           </div>
         </div>
-        {!gameOver ? (
-          <button className="btn-secondary py-2.5 px-5 text-sm font-bold border-amber-400/30 text-amber-300 hover:bg-amber-400/10" onClick={endTurn} disabled={busy}>
-            จบเทิร์น
+        <div className="flex items-center gap-2">
+          {!gameOver && (
+            <button className="btn-secondary py-2.5 px-5 text-sm font-bold border-amber-400/30 text-amber-300 hover:bg-amber-400/10" onClick={endTurn} disabled={busy}>
+              จบเทิร์น
+            </button>
+          )}
+          <button
+            className="btn-secondary py-2.5 px-4 text-sm"
+            onClick={() => setShowResetConfirm(true)}
+            disabled={busy}
+          >
+            รีเซ็ตห้อง
           </button>
-        ) : isSpy ? (
-          <button className="btn-primary py-2.5 px-5 text-sm" onClick={restartRound} disabled={busy}>
-            เริ่มรอบใหม่
-          </button>
-        ) : null}
+        </div>
       </div>
 
       {renderRulesModal()}
+      {renderResetModal()}
       {message && (
         <div className="toast-bar text-rose-300 border-rose-500/30">
           <span>{message}</span>
